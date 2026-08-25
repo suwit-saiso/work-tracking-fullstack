@@ -1,7 +1,7 @@
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
-const Database = require("better-sqlite3");
+const { getDatabase } = require("./db");
 const ExcelJS = require("exceljs");
 
 const app = express();
@@ -11,36 +11,7 @@ const HOST = process.env.HOST || "0.0.0.0";
 const dataDir = path.join(__dirname, "..", "data");
 fs.mkdirSync(dataDir, { recursive: true });
 
-const db = new Database(path.join(dataDir, "worktracking.db"));
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS work_orders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    work_order_id TEXT NOT NULL UNIQUE,
-    create_time TEXT NOT NULL,
-    author TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'Pending'
-      CHECK(status IN ('Pending','Ongoing','Complete','Achieve')),
-    priority TEXT NOT NULL DEFAULT 'Medium'
-      CHECK(priority IN ('Low','Medium','High'))
-  );
-
-  CREATE TABLE IF NOT EXISTS work_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    work_order_id INTEGER NOT NULL,
-    created_at TEXT NOT NULL,
-    author TEXT NOT NULL,
-    description TEXT NOT NULL,
-    FOREIGN KEY(work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_work_orders_status ON work_orders(status);
-  CREATE INDEX IF NOT EXISTS idx_work_orders_priority ON work_orders(priority);
-  CREATE INDEX IF NOT EXISTS idx_work_logs_work_order_id ON work_logs(work_order_id);
-`);
+let db;
 
 app.use(express.json({ limit: "1mb" }));
 
@@ -310,6 +281,45 @@ if (fs.existsSync(frontendDist)) {
   });
 }
 
-app.listen(PORT, HOST, () => {
-  console.log(`Work Tracking server running on http://${HOST}:${PORT}`);
+async function start() {
+  db = await getDatabase(path.join(dataDir, "worktracking.db"));
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS work_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      work_order_id TEXT NOT NULL UNIQUE,
+      create_time TEXT NOT NULL,
+      author TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'Pending'
+        CHECK(status IN ('Pending','Ongoing','Complete','Achieve')),
+      priority TEXT NOT NULL DEFAULT 'Medium'
+        CHECK(priority IN ('Low','Medium','High'))
+    );
+
+    CREATE TABLE IF NOT EXISTS work_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      work_order_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      author TEXT NOT NULL,
+      description TEXT NOT NULL,
+      FOREIGN KEY(work_order_id) REFERENCES work_orders(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_work_orders_status ON work_orders(status);
+    CREATE INDEX IF NOT EXISTS idx_work_orders_priority ON work_orders(priority);
+    CREATE INDEX IF NOT EXISTS idx_work_logs_work_order_id ON work_logs(work_order_id);
+  `);
+
+  app.listen(PORT, HOST, () => {
+    console.log(`Work Tracking server running on http://${HOST}:${PORT}`);
+  });
+}
+
+start().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
 });
+
